@@ -366,7 +366,7 @@ class ProblemSolver(object):
     file_name_path : str, optional
         Path of .pickle file for saving ``experiment_base.ProblemSolver`` objects.
     """
-    def __init__(self, solver_name=None, problem_name=None, solver_rename=None, problem_rename=None, solver=None, problem=None, solver_fixed_factors=None, problem_fixed_factors=None, model_fixed_factors=None, file_name_path=None, ni=None):
+    def __init__(self, solver_name=None, problem_name=None, solver_rename=None, problem_rename=None, solver=None, problem=None, solver_fixed_factors=None, problem_fixed_factors=None, model_fixed_factors=None, file_name_path=None):
         """There are two ways to create a ProblemSolver object:
             1. Provide the names of the solver and problem to look up in ``directory.py``.
             2. Provide the solver and problem objects to pair.
@@ -397,10 +397,6 @@ class ProblemSolver(object):
             self.file_name_path = f"./experiments/outputs/{self.solver.name}_on_{self.problem.name}.pickle"
         else:
             self.file_name_path = file_name_path
-        if ni is None:
-            self.ni = 1
-        else:
-            self.ni = ni
 
     def check_compatibility(self):
         """Check whether the experiment's solver and problem are compatible.
@@ -462,10 +458,8 @@ class ProblemSolver(object):
         rng1 = MRG32k3a(s_ss_sss_index=[2, 1, 0])
         rng2 = MRG32k3a(s_ss_sss_index=[2, 2, 0])
         rng3 = MRG32k3a(s_ss_sss_index=[2, 3, 0])
-        # rng4 = MRG32k3a(s_ss_sss_index=[2, 4, 0])  # For user interface (randomness in factors)
         self.solver.attach_rngs([rng1, rng2, rng3])
         # Run n_macroreps of the solver on the problem.
-        
         # Report recommended solutions and corresponding intermediate budgets.
         for mrep in range(self.n_macroreps):
             print(f"Running macroreplication {mrep + 1} of {self.n_macroreps} of Solver {self.solver.name} on Problem {self.problem.name}.")

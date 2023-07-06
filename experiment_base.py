@@ -2453,6 +2453,16 @@ class ProblemsSolvers(object):
             self.problem_names = [problem.name for problem in self.problems]
             self.n_solvers = len(self.solvers)
             self.n_problems = len(self.problems)
+        elif solvers is None and problems is not None:  # Method another
+            self.experiments = [[ProblemSolver(solver_name=solver_name, problem=problem) for problem in problems] for solver_name in solver_names]
+            # self.solvers = solvers
+            self.solvers = [solver_directory[solver_name](name=solver_name) for solver_name in solver_names]
+            self.solver_names = solver_names
+            self.problems = problems
+            # self.solver_names = [solver.name for solver in self.solvers]
+            self.problem_names = [problem.name for problem in self.problems]
+            self.n_solvers = len(self.solvers)
+            self.n_problems = len(self.problems)
         else:  # Method #1
             if solver_renames is None:
                 self.solver_names = solver_names

@@ -473,6 +473,7 @@ class SMF_Max(Problem):
         self.dim = self.model.factors["num_arcs"]
         self.lower_bounds = (0, ) * self.dim
         self.upper_bounds = (np.inf, ) * self.dim
+        self.factors["initial_solution"] = (1,) * self.dim
         self.Ci = np.ones(self.dim)
         self.Ce = None
         self.di = np.array([self.factors["cap"]])

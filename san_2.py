@@ -233,6 +233,7 @@ class SAN(Model):
         arcs_set.sort(key=lambda a: a[1])
         arcs_set.sort(key=lambda a: a[0])  
         self.factors["arcs"] = arcs_set
+        print('arcs: ', arcs_set)
         self.factors["num_arcs"] = len(self.factors["arcs"])
         self.factors["arc_means"] = (1,) * len(self.factors["arcs"])
 
@@ -502,22 +503,31 @@ class SANLongestPath(Problem):
         """
         vector = tuple(factor_dict["arc_means"])
         return vector
-                       
-    def attach_rngs(self, random_rng):
-        self.random_rng = random_rng
-        # self.model.attach_rng(random_rng)
-        
-        l = [100, 200, 300, 400, 500, 1000, 5000]
-        budget = random_rng[0].choice(l) * self.dim
-        self.factors["budget"] = budget
-        
-        return random_rng
     
-    def random_budget(self):
+    def get_coefficient(self, exp_rng):
+        if self.random == True:
+            # random_rng = self.random_rng
+            # exp_rng = random_rng[1]
+            c = []
+            for i in range(len(self.factors["c"])):
+                ci = exp_rng.expovariate(1)
+                c.append(ci)
+        return c
+    
+    def random_budget(self, random_rng):
         random_rng = self.random_rng[0]
         l = [100, 200, 300, 400, 500, 1000, 5000]
         budget = random_rng.choice(l) * self.dim
-        self.factors["budget"] = budget
+        return budget
+                       
+    def attach_rngs(self, random_rng):
+        self.random_rng = random_rng
+        
+        self.factors["budget"] = self.random_budget(random_rng[0])
+        
+        self.factors["c"] = self.get_coefficient(random_rng[1])
+        
+        return random_rng
 
     def response_dict_to_objectives(self, response_dict):
         """
@@ -573,7 +583,6 @@ class SANLongestPath(Problem):
         """
         det_stoch_constraints = None
         det_stoch_constraints_gradients = ((0,) * self.dim,)  # tuple of tuples – of sizes self.dim by self.dim, full of zeros
-        # det_stoch_constraints_gradients = ((0,) * len(self.model.factors["arcs"]), )
         return det_stoch_constraints, det_stoch_constraints_gradients
 
     def deterministic_objectives_and_gradients(self, x):
@@ -592,14 +601,6 @@ class SANLongestPath(Problem):
         det_objectives_gradients : tuple
             vector of gradients of deterministic components of objectives
         """
-        if self.random == True:
-            random_rng = self.random_rng
-            exp_rng = random_rng[1]
-            c = []
-            for i in range(len(self.factors["c"])):
-                ci = exp_rng.expovariate(1)
-                c.append(ci)
-            self.factors["c"] = c
         det_objectives = (np.sum(np.array(self.factors["c"]) / np.array(x))/len(x),)
         det_objectives_gradients = (-1 / (np.array(x) ** 2),)
         return det_objectives, det_objectives_gradients

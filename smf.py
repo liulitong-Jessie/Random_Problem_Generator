@@ -169,8 +169,15 @@ class SMF(Model):
     def check_set_arcs(self):
         return True 
     
-    def get_arcs(self, arcs, num_nodes, num_arcs, set_arcs, source, end, uni_rng):
+    def get_arcs(self, num_nodes, num_arcs, source, end, uni_rng):
         self.rand_fuc = True
+        
+        set_arcs = []
+        for n1 in range(0, num_nodes - 1):
+            for n2 in range(n1 + 1, num_nodes):
+                set_arcs.append((n1, n2))
+                
+        arcs = [(source, source + 1), (end - 1, end)]
         remove = []    
         def get_in(arcs, num_nodes, ind, in_ind=True):
             global remove
@@ -201,10 +208,7 @@ class SMF(Model):
             set0 = get_in(arcs, num_nodes, source)
             if i not in set0:
                 set1 = list(get_in(arcs, num_nodes, i, False))
-                # print(arcs)
-                
                 n2 = set1[uni_rng.randint(0, len(set1)-1)]
-                # print(set1)
                 set2 = [i for i in set0 if i < n2]
                 n1 = list(set2)[uni_rng.randint(0, len(set2)-1)]
                 
@@ -220,7 +224,6 @@ class SMF(Model):
                 n2 = set2[uni_rng.randint(0, len(set2)-1)]
                 arc = (n1, n2)
                 arcs = {*arcs, arc}
-                # print('arcs', arcs)
         
         if len(arcs) < num_arcs:
             remain_num = num_arcs - len(arcs)
@@ -259,11 +262,14 @@ class SMF(Model):
         self.random_rng = random_rng
         self.rand_fuc = False
         
-        arcs_set = [(0, 1), (8, 9)]
-        arcs_set = self.get_arcs(arcs_set, self.factors["num_nodes"], self.factors["num_arcs"], self.factors["set_arcs"], self.factors["source_index"], self.factors["sink_index"], random_rng[0])
+        self.factors["sink_index"] = self.factors["num_nodes"] - 1
+        arcs_set = self.get_arcs(self.factors["num_nodes"], self.factors["num_arcs"], self.factors["source_index"], self.factors["sink_index"], random_rng[0])
         arcs_set.sort(key=lambda a: a[1])
         arcs_set.sort(key=lambda a: a[0])  
         self.factors["arcs"] = arcs_set
+        self.factors["num_arcs"] = len(self.factors["arcs"])
+        
+        self.factors["mean_noise"] = [0 for i in range(len(self.factors["arcs"]))]
         
         self.factors["cov_noise"] = self.get_covariance(self.factors["num_arcs"], random_rng[1])
         
@@ -467,7 +473,7 @@ class SMF_Max(Problem):
         self.dim = self.model.factors["num_arcs"]
         self.lower_bounds = (0, ) * self.dim
         self.upper_bounds = (np.inf, ) * self.dim
-        self.Ci = np.ones(20)
+        self.Ci = np.ones(self.dim)
         self.Ce = None
         self.di = np.array([self.factors["cap"]])
         self.de = None
@@ -511,6 +517,15 @@ class SMF_Max(Problem):
         """
         vector = tuple(factor_dict["assigned_capacities"])
         return vector
+    
+    def attach_rngs(self, random_rng):
+        self.random_rng = random_rng
+        
+        l = [100, 200, 300, 400, 500, 1000, 5000]
+        budget = random_rng[0].choice(l) * self.dim
+        self.factors["budget"] = budget
+        
+        return random_rng
 
     def response_dict_to_objectives(self, response_dict):
         """

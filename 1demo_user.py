@@ -34,6 +34,7 @@ solvers = [randomsearch, astrodf, neldmd]
 
 # solver_names = ["RNDSRCH"]
 problem_set = [SANLongestPath, SMF_Max, RMITDMaxRevenue, OpenJacksonMinQueue, MM1MinMeanSojournTime]
+# xx = [(8,)*13, (1,)*20]
 rands = [True for i in range(len(problem_set))]
 
 
@@ -45,11 +46,7 @@ while len(L_num) != len(problem_index):
     print('Please re-input the number of instance you want for the ', len(problem_index), ' problems.')
     L_num = [int(i) for i in input("Please enter the number of random instances for each problem you want to generate (enter 0 for deterministic case): ").split()]
 
-L_para = []
-for i in range(len(problem_index)):
-    print('For problem ', str(problem_set[problem_index[i]]), ':')
-    l = eval(input("Please enter the parameters you want to override in terms of dictionary, otherwise please input a null dictionary: "))
-    L_para.append(l)
+L_para = [eval(i) for i in input("Please enter the parameters you want to override in terms of dictionary and separate by '/' for different problems").split('/')]
 
 
 # xx = [bool(i) for i in input('For each problem instance, please enter 1 if you want to specify an initial solution, otherwise enter 0: ').split()]
@@ -68,29 +65,32 @@ def rebase(random_rng, n):
     random_rng = new_rngs
     return random_rng
 
-
+# L_num = [3, 2]
+# myproblems = [SANLongestPath, SMF_Max]
 myproblems = [problem_set[i] for i in problem_index]
-
-## xx = [xx[i] for i in problem_index]  # if user want to specify initial solution
-## rands = [rands[i] for i in problem_index]
-
+# xx = [xx[i] for i in problem_index]  # if user want to specify initial solution
+rands = [rands[i] for i in problem_index]
 for i in range(len(problem_index)):
     if L_num[i] == 0:
         L_num[i] = 1
         rands[i] = False
 
+# random_rng = rebase(random_rng, i)
+# rng_list2 = rebase(rng_list2, i)
+# myproblem = SANLongestPath(random=rand, random_rng=rng_list2)
+# myproblem.attach_rngs(random_rng)
+# problem_name = 'SAN_' + str(i)
 
-def generate_problem(name, n_inst, rand, model_factor):
+def generate_problem(name, n_inst, rand):
     problems = []
     # myproblem = SANLongestPath(random = rand)
-    model_fixed_factors = model_factor
-    myproblem = name(model_fixed_factors = model_fixed_factors, random = rand)
+    myproblem = name(random = rand)
     random_rng = [MRG32k3a(s_ss_sss_index=[2, ss + 4, 0]) for ss in range(myproblem.model.n_random, myproblem.model.n_random + myproblem.n_rngs)]
     rng_list = [MRG32k3a(s_ss_sss_index=[2, 4 + ss, 0]) for ss in range(myproblem.model.n_random)]
     for i in range(n_inst):
         random_rng = rebase(random_rng, i)
         rng_list = rebase(rng_list, i)
-        myproblem = name(model_fixed_factors = model_fixed_factors, random=rand, random_rng=rng_list)
+        myproblem = name(random=rand, random_rng=rng_list)
         myproblem.attach_rngs(random_rng)
         myproblem.name = str(myproblem.model.name) + str(i)
         # problem_name = name + str(i)
@@ -106,14 +106,12 @@ rng_lists = []
 
 for i in range(len(L_num)):
     # myproblem = myproblems[i]
-    print('rand: ', rands[i])
-    myproblem, x = generate_problem(myproblems[i], L_num[i], rands[i], L_para[i])
+    myproblem, x = generate_problem(myproblems[i], L_num[i], rands[i])
     problems = [*problems, *myproblem]
     # rng_list = [MRG32k3a(s_ss_sss_index=[0, ss, 0]) for ss in range(myproblem.model.n_rngs)]
     for j in range(L_num[i]):
         rng_list = [MRG32k3a(s_ss_sss_index=[0, ss, 0]) for ss in range(myproblem[j].model.n_rngs)]
         print('arcs: ', myproblem[j].model.factors["arcs"])
-        print('budget: ', myproblem[j].factors["budget"])
         initials.append(x)
         rng_lists.append(rng_list)
 
@@ -122,14 +120,14 @@ for i in range(len(L_num)):
 mymetaexperiment = ProblemsSolvers(solver_names=solver_names, problems = problems)
 
 # Run a fixed number of macroreplications of each solver on each problem.
-mymetaexperiment.run(n_macroreps=2)
+mymetaexperiment.run(n_macroreps=10)
 
 
 print("Post-processing results.")
 # Run a fixed number of postreplications at all recommended solutions.
-mymetaexperiment.post_replicate(n_postreps=5)
+mymetaexperiment.post_replicate(n_postreps=50)
 # Find an optimal solution x* for normalization.
-mymetaexperiment.post_normalize(n_postreps_init_opt=5)
+mymetaexperiment.post_normalize(n_postreps_init_opt=50)
 
 print("Plotting results.")
 # print("Optimal solution: ",mymetaexperiment.xstar)

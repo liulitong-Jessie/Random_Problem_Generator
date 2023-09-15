@@ -7,6 +7,7 @@ A detailed description of the model/problem can be found
 `here <https://simopt.readthedocs.io/en/latest/san.html>`_.
 """
 import numpy as np
+from scipy.optimize import linprog
 
 from ..base import Model, Problem
 
@@ -58,9 +59,8 @@ class SAN(Model):
             "arcs": {
                 "description": "list of arcs",
                 "datatype": list,
-                # "default": [(1, 2), (1, 3), (2, 3), (2, 4), (2, 6), (3, 6), (4, 5),
-                #             (4, 7), (5, 6), (5, 8), (6, 9), (7, 8), (8, 9)]
-                "default": [(1, 2), (1, 3), (1, 6), (1, 8), (2, 9), (3, 4), (4, 5), (4, 7), (4, 8), (5, 8), (6, 8), (7, 9), (8, 9)]
+                "default": [(1, 2), (1, 3), (2, 3), (2, 4), (2, 6), (3, 6), (4, 5),
+                            (4, 7), (5, 6), (5, 8), (6, 9), (7, 8), (8, 9)]
             },
             
             "arc_means": {
@@ -208,18 +208,7 @@ class SAN(Model):
             remain = list(set(set_arcs) - set(arcs))
             idx = uni_rng.sample(range(0, len(remain)), remain_num)
             aa = set([remain[i] for i in idx])
-            arcs = {*arcs, *aa}     
-                        
-        # elif len(arcs) > num_arcs:
-        #     remain_num = len(arcs) - num_arcs
-        #     # print('remove: ',remove)
-        #     if len(remove) < remain_num:
-        #         print('invalid')
-        #         return False
-        #     else:
-        #         idx = uni_rng.sample(range(0, len(remain)), remain_num)
-        #         remove_set = set([remove[i] for i in idx])
-        #         arcs = arcs - remove_set
+            arcs = {*arcs, *aa}
 
         else:
             return list(arcs)
@@ -254,10 +243,6 @@ class SAN(Model):
         gradients : dict of dicts
             gradient estimates for each response
         """
-
-        # Generate the random problem instance
-        if self.random == True:
-            uni_rng = rng_list[-1]
 
         # Designate separate random number generators.
         exp_rng = rng_list[0]
@@ -430,7 +415,7 @@ class SANLongestPath(Problem):
         self.model_decision_factors = {"arc_means"}
         self.factors = fixed_factors
         self.random = random
-        self.n_rngs = 2  # Number of rngs used for the random instance
+        self.n_rngs = 3  # Number of rngs used for the random instance
         self.specifications = {
             "initial_solution": {
                 "description": "initial solution",
@@ -440,10 +425,10 @@ class SANLongestPath(Problem):
             "budget": {
                 "description": "max # of replications for a solver to take",
                 "datatype": int,
-                "default": 10000
+                "default": 100000
             },
             "c": {
-                "description": "coefficients for the objective function",
+                "description": "cost associated to each arc",
                 "datatype": tuple,
                 "default": (1,) * 13
             }
@@ -451,7 +436,7 @@ class SANLongestPath(Problem):
         self.check_factor_list = {
             "initial_solution": self.check_initial_solution,
             "budget": self.check_budget,
-            "c": self.check_co
+            "c": self.check_arc_costs
         }
         super().__init__(fixed_factors, model_fixed_factors)
         # Instantiate model with fixed factors and over-riden defaults.
@@ -459,13 +444,24 @@ class SANLongestPath(Problem):
         if random==True and random_rng != None:
             self.model.attach_rng(random_rng)
         self.dim = len(self.model.factors["arcs"])
+        # Update every values according to the randomly generated case
         self.factors["initial_solution"] = (8,) * self.dim
         self.factors["c"] = (1,) * self.dim 
         self.lower_bounds = (1e-2,) * self.dim
         self.upper_bounds = (np.inf,) * self.dim
+        self.Ci = None
+        self.Ce = None
+        self.di = None
+        self.de = None
     
-    def check_co(self):
-        return all(np.array(self.factors["c"]) >= 0)
+    def check_arc_costs(self):
+        positive = True
+        for x in list(self.factors["c"]):
+            positive = positive & x > 0
+        return (len(self.factors["c"]) != self.dim) & positive
+    
+    def check_budget(self):
+        return self.factors["budget"] > 0
 
     def vector_to_factor_dict(self, vector):
         """
@@ -505,27 +501,29 @@ class SANLongestPath(Problem):
         return vector
     
     def get_coefficient(self, exp_rng):
-        if self.random == True:
-            # random_rng = self.random_rng
-            # exp_rng = random_rng[1]
-            c = []
-            for i in range(len(self.factors["c"])):
-                ci = exp_rng.expovariate(1)
-                c.append(ci)
+        c = []
+        for i in range(len(self.factors["c"])):
+            ci = exp_rng.expovariate(1)
+            c.append(ci)
+
         return c
     
-    def random_budget(self, random_rng):
-        random_rng = self.random_rng[0]
-        l = [100, 200, 300, 400, 500, 1000, 5000]
-        budget = random_rng.choice(l) * self.dim
+    def random_budget(self, uni_rng):
+        # Generate random budget proportion to the dimension
+        l = [100, 200, 300, 400, 500]
+        budget = uni_rng.choice(l) * self.dim
         return budget
                        
     def attach_rngs(self, random_rng):
+        # Attach rng for problem class and generate random problem factors for random instances
         self.random_rng = random_rng
         
-        self.factors["budget"] = self.random_budget(random_rng[0])
-        
-        self.factors["c"] = self.get_coefficient(random_rng[1])
+        if self.random == True:
+            self.factors["budget"] = self.random_budget(random_rng[0])
+            self.factors["c"] = self.get_coefficient(random_rng[1])
+            
+        print('budget: ', self.factors['budget'])
+        print('c: ', self.factors["c"])
         
         return random_rng
 
@@ -602,7 +600,7 @@ class SANLongestPath(Problem):
             vector of gradients of deterministic components of objectives
         """
         det_objectives = (np.sum(np.array(self.factors["c"]) / np.array(x))/len(x),)
-        det_objectives_gradients = (-1 / (np.array(x) ** 2),)
+        det_objectives_gradients = (-np.array(self.factors["c"]) / np.array(x) ** 2 / len(x),)
         return det_objectives, det_objectives_gradients
 
     def check_deterministic_constraints(self, x):
@@ -633,8 +631,644 @@ class SANLongestPath(Problem):
         Returns
         -------
         x : tuple
-            vector of decision variables
+            vector of decision variables·
         """
         x = tuple([rand_sol_rng.lognormalvariate(lq=0.1, uq=10) for _ in range(self.dim)])
-        # x = tuple([rand_sol_rng.lognormalvariate(lq=0.1, uq=10) for _ in range(len(self.model.factors["arcs"]))])
+        return x
+
+
+"""
+Summary
+-------
+Minimize the duration of the longest path from a to i subject to a lower bound in sum of arc_means.
+"""
+
+class SANLongestPathConstr(Problem):
+    """
+    Base class to implement simulation-optimization problems.
+
+    Attributes
+    ----------
+    name : string
+        name of problem
+    dim : int
+        number of decision variables
+    n_objectives : int
+        number of objectives
+    n_stochastic_constraints : int
+        number of stochastic constraints
+    minmax : tuple of int (+/- 1)
+        indicator of maximization (+1) or minimization (-1) for each objective
+    constraint_type : string
+        description of constraints types:
+            "unconstrained", "box", "deterministic", "stochastic"
+    variable_type : string
+        description of variable types:
+            "discrete", "continuous", "mixed"
+    lower_bounds : tuple
+        lower bound for each decision variable
+    upper_bounds : tuple
+        upper bound for each decision variable
+    gradient_available : bool
+        indicates if gradient of objective function is available
+    optimal_value : float
+        optimal objective function value
+    optimal_solution : tuple
+        optimal solution
+    model : Model object
+        associated simulation model that generates replications
+    model_default_factors : dict
+        default values for overriding model-level default factors
+    model_fixed_factors : dict
+        combination of overriden model-level factors and defaults
+    model_decision_factors : set of str
+        set of keys for factors that are decision variables
+    rng_list : list of mrg32k3a.mrg32k3a.MRG32k3a objects
+        list of RNGs used to generate a random initial solution
+        or a random problem instance
+    factors : dict
+        changeable factors of the problem
+            initial_solution : list
+                default initial solution from which solvers start
+            budget : int > 0
+                max number of replications (fn evals) for a solver to take
+    specifications : dict
+        details of each factor (for GUI, data validation, and defaults)
+
+    Arguments
+    ---------
+    name : str
+        user-specified name for problem
+    fixed_factors : dict
+        dictionary of user-specified problem factors
+    model_fixed factors : dict
+        subset of user-specified non-decision factors to pass through to the model
+
+    See also
+    --------
+    base.Problem
+    """
+    def __init__(self, name="SAN-2", fixed_factors=None, model_fixed_factors=None, random=False, random_rng=None):
+        if fixed_factors is None:
+            fixed_factors = {}
+        if model_fixed_factors is None:
+            model_fixed_factors = {}
+        self.name = name
+        self.n_objectives = 1
+        self.n_stochastic_constraints = 0
+        self.minmax = (-1,)
+        self.constraint_type = "box"
+        self.variable_type = "continuous"
+        self.gradient_available = True
+        self.optimal_value = None
+        self.optimal_solution = None
+        self.model_default_factors = {}
+        self.model_decision_factors = {"arc_means"}
+        self.factors = fixed_factors
+        self.random = random
+        self.random_const = False
+        if self.random_const:
+            self.num_con = 3
+        else:
+            self.num_con = 1
+        self.n_rngs = 3  # Number of rngs used for the random instance
+        self.specifications = {
+            "initial_solution": {
+                "description": "initial solution",
+                "datatype": tuple,
+                "default": (15,) * 13
+            },
+            "budget": {
+                "description": "max # of replications for a solver to take",
+                "datatype": int,
+                "default": 100000
+            },
+            "arc_costs": {
+                "description": "cost associated to each arc",
+                "datatype": tuple,
+                "default": (1,) * 13
+            },
+            "r_const": {
+                "description": "random constraint for arc rates",
+                'datatype': int,
+                "default": 0
+            },
+            "sum_lb": {
+                "description": "Lower bound for the sum of arc means",
+                "datatype": float,
+                "default": 100.0
+            },
+            "lbs":{
+                "description": "Lower bounds for the selected sum of arc means",
+                "datatype": float,
+                "default": 0.0,
+            }
+        }
+        self.check_factor_list = {
+            "initial_solution": self.check_initial_solution,
+            "budget": self.check_budget,
+            "arc_costs": self.check_arc_costs,
+            "r_const": self.check_const,
+            "sum_lb": self.check_lb,
+            "lbs": self.check_lbs
+        }
+        super().__init__(fixed_factors, model_fixed_factors)
+        # Instantiate model with fixed factors and over-riden defaults.
+        self.model = SAN(self.model_fixed_factors, random)
+        if random==True and random_rng != None:
+            self.model.attach_rng(random_rng)
+        self.dim = len(self.model.factors["arcs"])
+        self.factors["initial_solution"] = (15,) * self.dim
+        self.factors["arc_costs"] = (1,) * self.dim 
+        self.lower_bounds = (1e-2,) * self.dim
+        self.upper_bounds = (np.inf,) * self.dim
+        self.Ci = -1 * np.ones(self.dim)
+        self.Ce = None
+        self.di = -1 * np.array([self.factors["sum_lb"]])
+        self.de = None
+    
+    def check_arc_costs(self):
+        positive = True
+        for x in list(self.factors["arc_costs"]):
+            positive = positive & x > 0
+        return (len(self.factors["arc_costs"]) != self.dim) & positive
+    
+    def check_budget(self):
+        return self.factors["budget"] > 0
+    
+    def check_const(self):
+        return self.factors["r_const"] >= 0
+    
+    def check_lb(self):
+        return self.factors["sum_lb"] >= 0
+    
+    def check_lbs(self):
+        return self.factors["lbs"] >= 0
+
+    def vector_to_factor_dict(self, vector):
+        """
+        Convert a vector of variables to a dictionary with factor keys
+
+        Arguments
+        ---------
+        vector : tuple
+            vector of values associated with decision variables
+
+        Returns
+        -------
+        factor_dict : dictionary
+            dictionary with factor keys and associated values
+        """
+        factor_dict = {
+            "arc_means": vector[:]
+        }
+        return factor_dict
+
+    def factor_dict_to_vector(self, factor_dict):
+        """
+        Convert a dictionary with factor keys to a vector
+        of variables.
+
+        Arguments
+        ---------
+        factor_dict : dictionary
+            dictionary with factor keys and associated values
+
+        Returns
+        -------
+        vector : tuple
+            vector of values associated with decision variables
+        """
+        vector = tuple(factor_dict["arc_means"])
+        return vector
+    
+    def get_coefficient(self, exp_rng):
+        if self.random == True:
+            c = []
+            for i in range(len(self.factors["arc_costs"])):
+                ci = exp_rng.expovariate(1)
+                c.append(ci)
+            return c
+        else:
+            return self.factors['arc_costs']
+    
+    def random_budget(self, random_rng):
+        if self.random == True:
+            l = [10000, 20000]
+            budget = random_rng.choice(l) * self.dim
+            return budget
+        else:
+            return self.factors['budget']
+    
+    def get_const(self, n, uni_rng):
+        # Randomly choose a subset of arcs that have limited budget
+        C = []
+        L = []
+        for i in range(n):
+            if self.random_const == True:
+                const = uni_rng.sample(range(0, self.dim), int(self.dim/4))
+                # lb = uni_rng.uniform(0, int(self.dim/4)) * uni_rng.uniform(1, 6)
+                lb = int(self.dim/4) * uni_rng.uniform(1, int(self.factors["sum_lb"]/self.dim))
+                C.append(const)
+                L.append(lb)
+            else:
+                return [[i for i in range(self.dim)]], self.factors['sum_lb']
+        return C, L
+                       
+    def attach_rngs(self, random_rng):
+        # Attach rng for problem class and generate random problem factors for random instances
+        self.random_rng = random_rng
+        
+        if self.random:
+            self.factors["budget"] = self.random_budget(random_rng[0])
+            
+            self.factors["arc_costs"] = self.get_coefficient(random_rng[1])
+            print('c: ', self.factors["arc_costs"])
+        
+            # Random constraint
+            if self.random_const:
+                self.factors["r_const"], self.factors['lbs'] = self.get_const(self.num_con, random_rng[2])
+                self.factors["lbs"].append(self.factors["sum_lb"])  # Combine the sum_lb with the partial_lb
+                self.factors["r_const"].append([i for i in range(self.dim)])  # Combine the index related to sum_lb with the r_const
+                # print('r_const: ', self.factors["r_const"])
+                # print('partial_lb: ', self.factors['partial_lb'])
+            else:
+                self.factors["r_const"], self.factors['sum_lb'] = self.get_const(self.num_con, random_rng[2])
+                self.factors["lbs"] = [self.factors["sum_lb"]]
+        else:
+            self.factors["r_const"] = [[i for i in range(self.dim)]]
+            self.factors["lbs"] = [self.factors["sum_lb"]]
+        
+        self.factors["lbs"] += [0 for i in range(self.dim)]  # Require each arc means larger or equal to 0
+        self.factors["r_const"] += [[i] for i in range(self.dim)]
+        print('r_const: ', self.factors["r_const"])
+        print('lbs: ', self.factors['lbs'])
+        
+        return random_rng
+
+    def response_dict_to_objectives(self, response_dict):
+        """
+        Convert a dictionary with response keys to a vector
+        of objectives.
+
+        Arguments
+        ---------
+        response_dict : dictionary
+            dictionary with response keys and associated values
+
+        Returns
+        -------
+        objectives : tuple
+            vector of objectives
+        """
+        objectives = (response_dict["longest_path_length"],)
+        return objectives
+
+    def response_dict_to_stoch_constraints(self, response_dict):
+        """
+        Convert a dictionary with response keys to a vector
+        of left-hand sides of stochastic constraints: E[Y] <= 0
+
+        Arguments
+        ---------
+        response_dict : dictionary
+            dictionary with response keys and associated values
+
+        Returns
+        -------
+        stoch_constraints : tuple
+            vector of LHSs of stochastic constraint
+        """
+        stoch_constraints = None
+        return stoch_constraints
+
+    def deterministic_stochastic_constraints_and_gradients(self, x):
+        """
+        Compute deterministic components of stochastic constraints for a solution `x`.
+
+        Arguments
+        ---------
+        x : tuple
+            vector of decision variables
+
+        Returns
+        -------
+        det_stoch_constraints : tuple
+            vector of deterministic components of stochastic constraints
+        det_stoch_constraints_gradients : tuple
+            vector of gradients of deterministic components of stochastic constraints
+        """
+        det_stoch_constraints = None
+        det_stoch_constraints_gradients = ((0,) * self.dim,)  # tuple of tuples – of sizes self.dim by self.dim, full of zeros
+        return det_stoch_constraints, det_stoch_constraints_gradients
+
+    def deterministic_objectives_and_gradients(self, x):
+        """
+        Compute deterministic components of objectives for a solution `x`.
+
+        Arguments
+        ---------
+        x : tuple
+            vector of decision variables
+
+        Returns
+        -------
+        det_objectives : tuple
+            vector of deterministic components of objectives
+        det_objectives_gradients : tuple
+            vector of gradients of deterministic components of objectives
+        """
+
+        det_objectives = (0,)
+        det_objectives_gradients = ((0,) * self.dim,)
+        return det_objectives, det_objectives_gradients
+
+    def check_deterministic_constraints(self, x):
+        """
+        Check if a solution `x` satisfies the problem's deterministic constraints.
+
+        Arguments
+        ---------
+        x : tuple
+            vector of decision variables
+
+        Returns
+        -------
+        satisfies : bool
+            indicates if solution `x` satisfies the deterministic constraints.
+        """
+
+        return np.all(np.array(x) >= 0)
+    
+    def find_feasible(self):
+        """
+        Find an initial feasible solution (if not user-provided)
+        by interior point method.
+
+        Arguments
+        ---------
+        problem : Problem object
+            simulation-optimization problem to solve
+
+        Returns
+        -------
+        x0 : ndarray
+            an initial feasible solution
+        tol: float
+            Floating point comparison tolerance
+        """
+        c = [0 for i in range(self.dim)]
+        l1 = [-1 for i in range(self.dim)]
+        A = [l1]
+        b = [-self.factors["sum_lb"]]
+        if self.random_const:
+            b.extend([-plb for plb in self.factors["lbs"]])
+            for idx in self.factors["r_const"]:
+                l2 = [-1 if i in idx else 0 for i in range(self.dim)]
+                A.append(l2)
+
+        res = linprog(c, A_ub=A, b_ub=b, bounds=(0, None), method='interior-point')
+        
+        return res.x
+
+    
+    def hit_and_run_single(self, x, rand_sol_rng, partial_lb = None, indices = None):
+        """
+        Find an random feasible solution by running hit-and-run algorithm
+        for one iteration.
+
+        Arguments
+        ---------
+        x : ndarray/list
+            starting point
+        partial_lb : list
+            lower bounds for the selected sum of arc means
+        indices : list of list
+            list of indices of the selected arcs
+        rand_sol_rng : mrg32k3a.mrg32k3a.MRG32k3a
+            random-number generator used to sample a new random solution
+
+        Returns
+        -------
+        x : ndarray
+            a random feasible solution after one iteration
+        """
+        while True:
+            dk = np.array([rand_sol_rng.uniform(-1, 1) for _ in range(self.dim)])
+            dk = dk/np.linalg.norm(dk)
+            # print(dk)
+            # crit = -x/dk
+            crit = []
+            for i in range(len(x)):
+                if dk[i] == 0:
+                    crit.append(0)
+                else:
+                    crit.append(-x[i]/dk[i])
+            ub, lb = [], []
+            if np.sum(dk) >= 0:
+                lb.append((self.factors['sum_lb'] - sum(x))/sum(dk))
+            if np.sum(dk) < 0:
+                ub.append((self.factors['sum_lb'] - sum(x))/sum(dk))
+            
+            if self.random_const:
+                for i in range(len(partial_lb)):
+                    xl = [x[j] for j in indices[i]]
+                    dl = [dk[j] for j in indices[i]]
+                    if np.sum(dl) >= 0:
+                        lb.append((partial_lb[i] - sum(xl))/sum(dl))
+                    else:
+                        ub.append((partial_lb[i] - sum(xl))/sum(dl))
+                
+            # lamb * dk[i] + x[i] >= 0 --> lamb >= -x[i]/dk[i] for dk[i]>0
+            if np.all(dk>=0):
+                lb.append(max([i for i in crit if i <= 0]))
+            elif np.all(dk<=0):
+                ub.append(min([i for i in crit if i >= 0]))
+            else:
+                ub.append(min([i for i in crit if i >= 0]))
+                lb.append(max([i for i in crit if i <= 0]))
+            if len(ub) == 0:
+                lbb = max(lb)
+                ubb = lbb + 1
+            elif len(lb) == 0:
+                ubb = min(ub)
+                lbb = ubb - 1
+            else:
+                ubb = min(ub)
+                lbb = max(lb)
+            if lbb<=ubb:
+                break
+        
+        lamb = rand_sol_rng.uniform(lbb, ubb)
+        
+        return x + lamb * dk
+    
+    def check_feasible(self, x):
+        """
+        Check whether a solution is feasible or not.
+
+        Arguments
+        ---------
+        x : ndarray/list
+            current point
+
+        Returns
+        -------
+        feasible : bool
+            indicates if solution `x` satisfies the deterministic constraints.
+        """
+        if sum(x) >= self.factors['sum_lb']:
+            for i in range(len(self.factors["lbs"])):
+                if sum([x[j] for j in self.factors["r_const"][i]]) < self.factors["lbs"][i]:
+                    return False
+            return True
+        else:
+            return False
+    
+    # def hit_and_run(self, x, rand_sol_rng, max_iter=20):
+    #     """
+    #     Find an random feasible solution by running hit-and-run algorithm with maximum
+    #     step numbers as stopping criteria.
+        
+    #     Arguments
+    #     ---------
+    #     x : ndarray/list
+    #         starting point
+    #     rand_sol_rng : mrg32k3a.mrg32k3a.MRG32k3a
+    #         random-number generator used to sample a new random solution
+    #     max_iter : int
+    #         maximum number of iterations
+            
+    #     Returns
+    #     -------
+    #     x : ndarray
+    #         a random feasible solution that meets the stopping creteria
+    #     """
+    #     # if not self.check_feasible(x):
+    #     #     x = self.find_feasible_initial(None, self.Ci, None, self.di)
+        
+    #     x = self.find_feasible()
+        
+    #     if self.random_const:
+    #         partial_lb = self.factors['partial_lb']
+    #         indices = self.factors['r_const']
+    #     else:
+    #         partial_lb = None
+    #         indices = None
+        
+    #     for i in range(max_iter):
+    #         x = self.hit_and_run_single(x, rand_sol_rng, partial_lb, indices)
+    #     return x
+    
+    # def get_random_solution(self, rand_sol_rng):
+    #     """
+    #     Generate a random solution for starting or restarting solvers.
+
+    #     Arguments
+    #     ---------
+    #     rand_sol_rng : mrg32k3a.mrg32k3a.MRG32k3a
+    #         random-number generator used to sample a new random solution
+
+    #     Returns
+    #     -------
+    #     x : tuple
+    #         vector of decision variables
+    #     """
+        
+    #     x = self.hit_and_run(self.factors["initial_solution"], rand_sol_rng)
+        
+    #     x = tuple(x)
+    #     # print('random solution: ', x)
+        
+    #     return x
+    
+    
+    # def hit_and_run(self, x, rand_sol_rng, upper_bounds, upper_indices, lower_bounds, lower_indices, dim, n = 50):
+    #     """
+    #     Find an random feasible solution by running hit-and-run algorithm
+    #     for one iteration.
+
+    #     Arguments
+    #     ---------
+    #     x : ndarray/list
+    #         starting point
+    #     rand_sol_rng : mrg32k3a.mrg32k3a.MRG32k3a
+    #         random-number generator used to sample a new random solution
+    #     upper_bounds : list
+    #         upper bounds of the linear constraints
+    #     lower_bounds : list
+    #         lower bounds of the linear constraints
+    #     upper_indices : list of lists
+    #         ith list corresponds to the indices of x that bounded by ith upper_bounds
+    #     lower_indices : list of lists
+    #         ith list corresponds to the indices of x that bounded by ith lower_bounds
+    #     dim : int
+    #         dimension of the problem
+    #     n: int
+    #         number of maximum iterations to run before returning the current solution
+
+    #     Returns
+    #     -------
+    #     x : ndarray
+    #         a random feasible solution after one iteration
+    #     """
+        
+    #     for step in range(n):
+    #         while True:
+    #             dk = np.array([rand_sol_rng.uniform(-1, 1) for _ in range(dim)])
+    #             dk = dk/np.linalg.norm(dk)
+                
+    #             ub, lb = [], []
+
+    #             for i in range(len(upper_bounds)):
+    #                 xl = [x[j] for j in upper_indices[i]]
+    #                 dl = [dk[j] for j in upper_indices[i]]
+    #                 if np.sum(dl) > 0:
+    #                     ub.append((upper_bounds[i] - sum(xl))/sum(dl))
+    #                 else:
+    #                     lb.append((upper_bounds[i] - sum(xl))/sum(dl))
+
+    #             for i in range(len(lower_bounds)):
+    #                 xl = [x[j] for j in lower_indices[i]]
+    #                 dl = [dk[j] for j in lower_indices[i]]
+    #                 if np.sum(dl) > 0:
+    #                     lb.append((lower_bounds[i] - sum(xl))/sum(dl))
+    #                 else:
+    #                     ub.append((lower_bounds[i] - sum(xl))/sum(dl))
+                
+    #             if len(ub) == 0 or len(lb) == 0:
+    #                 return ValueError("The Feasible Region is not Bounded")
+    #             else:
+    #                 ubb = min(ub)
+    #                 lbb = max(lb)
+    #             if lbb<=ubb:
+    #                 break
+            
+    #         lamb = rand_sol_rng.uniform(lbb, ubb)
+            
+    #         x += lamb * dk
+        
+    #     return x
+    
+    def get_random_solution(self, rand_sol_rng):
+        """
+        Generate a random solution for starting or restarting solvers.
+
+        Arguments
+        ---------
+        rand_sol_rng : mrg32k3a.mrg32k3a.MRG32k3a
+            random-number generator used to sample a new random solution
+
+        Returns
+        -------
+        x : tuple
+            vector of decision variables
+        """
+        if self.check_feasible(self.factors["initial_solution"]):
+            x0 = self.factors["initial_solution"]
+        else:
+            x0 = self.find_feasible()
+        x = rand_sol_rng.hit_and_run(x0, [10 * self.factors['sum_lb']], [[i for i in range(self.dim)]], self.factors["lbs"], self.factors["r_const"], self.dim, 20)
+
+        x = tuple(x)
         return x
